@@ -44,22 +44,9 @@ ALPACA_SECRET_KEY=tu_secret_key
 Ejecuta el bot:
 
 ```bash
-python TradingDemo.py
+python trading_demo.py
 ```
 
-Salida esperada:
-
-```text
-Señal detectada: nada
-Razón: No hay cruce entre MA20 y MA50
-Sin acción
-```
-O
-```text
-Señal detectada: compra
-Razón: MA20 cruzó por encima de MA50
-Ejecutando COMPRA...
-```
 ---
 
 ## Ejemplo de flujo
