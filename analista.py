@@ -7,15 +7,30 @@ def calcular_indicadores(data):
     data['MA20'] = data['Close'].rolling(20).mean()
     data['MA50'] = data['Close'].rolling(50).mean()
     return data
-def calcular_senal(data):
-    """Detecta cruce de medias y retorna 1 (compra), -1 (venta) o 0 (sin señal)."""
-    ma20_ult = data['MA20'].iloc[-1]
-    ma50_ult = data['MA50'].iloc[-1]
-    ma20_ant = data['MA20'].iloc[-2]
-    ma50_ant = data['MA50'].iloc[-2]
+def historial_cruces(data):
+    cruces = data[data['Position'] != 0]
 
-    if ma20_ant <= ma50_ant and ma20_ult > ma50_ult:
+    if not cruces.empty:
+        print("Historial de cruces detectados:")
+        print(cruces[['Close', 'MA20', 'MA50', 'Position']])
+    else:
+        print("No se detectó ningún cruce en el periodo.")
+
+def calcular_senales(data):
+    data['Signal'] = 0
+    data.loc[data['MA20'] > data['MA50'], 'Signal'] = 1
+    data.loc[data['MA20'] < data['MA50'], 'Signal'] = -1
+    data['Position'] = data['Signal'].diff()
+    return data
+
+def calcular_senal(data):
+    """Usa la última posición para decidir acción."""
+    ultima = data['Position'].iloc[-1]
+
+    if ultima == 1:
         return 1
-    if ma20_ant >= ma50_ant and ma20_ult < ma50_ult:
+    elif ultima == -1:
         return -1
     return 0
+
+
