@@ -1,8 +1,15 @@
+"""
+Módulo para la simulación de trading utilizando la API de Alpaca.
+Este script calcula indicadores técnicos y ejecuta órdenes en la cuenta demo.
+"""
+
+import os
 import yfinance as yf
 import pandas as pd
 import alpaca_trade_api as tradeapi
 from dotenv import load_dotenv
-import os
+import matplotlib.pyplot as plt
+
 
 load_dotenv()
 #CONFIGURACION DE LA API DE ALPACA
@@ -33,11 +40,53 @@ def calcular_indicadores(data):
     data['MA50'] = data['Close'].rolling(50).mean()
     return data
 
+def calcular_senales(data):
+    data['Signal'] = 0
+    data.loc[data['MA20'] > data['MA50'], 'Signal'] = 1
+    data.loc[data['MA20'] < data['MA50'], 'Signal'] = -1
+    data['Position'] = data['Signal'].diff()
+    return data
+
+#Grafico:
+def graficar(data):
+    plt.figure(figsize=(14, 7))
+
+    # Precio y medias
+    plt.plot(data['Close'], label='Precio de Cierre', alpha=0.5)
+    plt.plot(data['MA20'], label='MA20')
+    plt.plot(data['MA50'], label='MA50')
+
+    # Señales
+    data['Signal'] = 0
+    data.loc[data['MA20'] > data['MA50'], 'Signal'] = 1
+    data.loc[data['MA20'] < data['MA50'], 'Signal'] = -1
+    data['Position'] = data['Signal'].diff()
+
+    # Compra
+    plt.plot(
+        data[data['Position'] == 1].index,
+        data['MA20'][data['Position'] == 1],
+        '^',
+        markersize=10,
+        label='Compra'
+    )
+
+    # Venta
+    plt.plot(
+        data[data['Position'] == -1].index,
+        data['MA20'][data['Position'] == -1],
+        'v',
+        markersize=10,
+        label='Venta'
+    )
+
+    plt.title("Estrategia Cruce de Medias Móviles")
+    plt.legend()
+    plt.grid()
+    plt.show()
 
 # --- 3. SEÑAL ---
 def generar_senal(data):
-    data = data.dropna()
-
     ultima = data.iloc[-1]
     anterior = data.iloc[-2]
 
@@ -47,13 +96,12 @@ def generar_senal(data):
     ma50_ult = float(ultima['MA50'])
 
     if ma20_ant < ma50_ant and ma20_ult > ma50_ult:
-        return "compra"
+        return "compra", "MA20 cruzó por encima de MA50"
 
     elif ma20_ant > ma50_ant and ma20_ult < ma50_ult:
-        return "venta"
+        return "venta", "MA20 cruzó por debajo de MA50"
 
-    return "nada"
-
+    return "nada", "No hay cruce entre MA20 y MA50"
 
 # --- 4. EJECUCIÓN ---
 def ejecutar_trade(senal):
@@ -61,7 +109,7 @@ def ejecutar_trade(senal):
     tengo_posicion = any(p.symbol == "AMZN" for p in posiciones)
 
     if senal == "compra" and not tengo_posicion:
-        print("Comprando...")
+        print("Ejecutando COMPRA...")
         api.submit_order(
             symbol="AMZN",
             qty=1,
@@ -71,7 +119,7 @@ def ejecutar_trade(senal):
         )
 
     elif senal == "venta" and tengo_posicion:
-        print("Vendiendo...")
+        print("Ejecutando VENTA...")
         api.submit_order(
             symbol="AMZN",
             qty=1,
@@ -79,6 +127,13 @@ def ejecutar_trade(senal):
             type="market",
             time_in_force="gtc"
         )
+
+    elif senal == "compra" and tengo_posicion:
+        print("No compra: ya tienes posición abierta")
+
+    elif senal == "venta" and not tengo_posicion:
+        print("No venta: no tienes posición")
+
     else:
         print("Sin acción")
 
@@ -86,7 +141,10 @@ def ejecutar_trade(senal):
 # --- MAIN ---
 data = obtener_datos()
 data = calcular_indicadores(data)
-senal = generar_senal(data)
+graficar(data) #Generamos el grafico
+senal, razon = generar_senal(data)
 
 print(f"Señal detectada: {senal}")
+print(f"Razón: {razon}")
+
 ejecutar_trade(senal)
