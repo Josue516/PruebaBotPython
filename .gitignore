@@ -1,1 +1,4 @@
 .env
+
+#Carpetas de python
+__pycache__/
