@@ -24,7 +24,7 @@ api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version='v2')
 
 def obtener_datos(simbolo):
     """Descarga datos históricos de un activo."""
-    data = yf.download(simbolo, period="3mo", interval="1h")
+    data = yf.download(simbolo, period="1y", interval="1h")
 
     if isinstance(data.columns, pd.MultiIndex):
         data.columns = data.columns.get_level_values(0)
@@ -96,15 +96,15 @@ def ejecutar_trade(simbolo, senal, cantidad):
 
 # --- MAIN ---
 #Hay que recordar siempre mantener el orden al ejecutar las funciones, ya me dieron varios errores por eso...
-if __name__ == "__main__":
-    simbolos = ["AMZN", "AAPL", "MSFT"]
+def ejecutar_bot_completo():
+    """Función que encapsula la lógica de análisis y trading."""
+    simbolos = ["INTC","WBA", "MSFT"]
     fig, axes = plt.subplots(1, len(simbolos), figsize=(15, 5))
 
     for i, simbolo in enumerate(simbolos):
         print(f"\n--- {simbolo} ---")
-
         data = obtener_datos(simbolo)
-        if data is None:
+        if data is None or data.empty:
             continue
 
         data = calcular_indicadores(data)
@@ -124,4 +124,10 @@ if __name__ == "__main__":
         ejecutar_trade(simbolo, senal, cantidad)
 
     plt.tight_layout()
-    plt.show()
+    plt.show(block=False) # block=False permite que el script siga
+    plt.pause(5)          # Muestra el gráfico 5 segundos
+    plt.close(fig)        # Cierra la ventana para la siguiente vuelta
+
+# Esto permite que sigas probando el archivo solo, si quieres
+if __name__ == "__main__":
+    ejecutar_bot_completo()

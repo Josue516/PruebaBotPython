@@ -20,7 +20,14 @@ def calcular_senales(data):
     data['Signal'] = 0
     data.loc[data['MA20'] > data['MA50'], 'Signal'] = 1
     data.loc[data['MA20'] < data['MA50'], 'Signal'] = -1
+    
+    # Calculamos la diferencia
     data['Position'] = data['Signal'].diff()
+    
+    # NORMALIZACIÓN: Cualquier valor > 0 es compra (1), cualquier < 0 es venta (-1)
+    data.loc[data['Position'] > 0, 'Position'] = 1
+    data.loc[data['Position'] < 0, 'Position'] = -1
+    
     return data
 
 def calcular_senal(data):

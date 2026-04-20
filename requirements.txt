@@ -1,0 +1,5 @@
+pandas>=2.0
+yfinance>=0.2
+matplotlib>=3.7
+alpaca-trade-api>=3.0
+python-dotenv>=1.0
