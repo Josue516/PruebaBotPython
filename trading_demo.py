@@ -3,131 +3,89 @@ Módulo principal de la simulación de trading con la API de Alpaca.
 Orquesta la descarga de datos, análisis técnico, gestión de riesgo y ejecución de órdenes.
 """
 import os
-import yfinance as yf
-import pandas as pd
 import alpaca_trade_api as tradeapi
-import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
+from datetime import datetime
 from dotenv import load_dotenv
-from analista import calcular_indicadores, calcular_senal, historial_cruces, calcular_senales
-from gestor_riesgo import validar_orden
+from config import STRATEGY, WATCHLIST, PORTFOLIO_FILE, API_CONFIG
+from modulos.persistencia import cargar_portafolio, guardar_portafolio, actualizar_posicion
+from modulos.scanner import cumple_filtros_calidad, obtener_precio_actual
+from modulos.engine import calcular_salida, calcular_cantidad_compra, procesar_dividendos_y_efectivo
 
+# --- CONFIGURACIÓN DE PRUEBA ---
+MODO_SIMULACION = True # Cambia a False para ejecutar órdenes reales en Alpaca
 load_dotenv()
-
-API_KEY = os.getenv("ALPACA_API_KEY")
-SECRET_KEY = os.getenv("ALPACA_SECRET_KEY")
-BASE_URL = "https://paper-api.alpaca.markets"
-
-api = tradeapi.REST(API_KEY, SECRET_KEY, BASE_URL, api_version='v2')
-
-
-
-def obtener_datos(simbolo):
-    """Descarga datos históricos de un activo."""
-    data = yf.download(simbolo, period="1y", interval="1h")
-
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
-
-    data.dropna(how='all', inplace=True)
-
-    print(f"{simbolo}: {len(data)} filas descargadas.")
-    return data
-
-
-def graficar(data, simbolo, ax):
-    """Grafica el precio, medias móviles y señales en un eje dado."""
-
-    ax.xaxis.set_major_formatter(mdates.DateFormatter('%m-%d'))  # Mostramos solo mes-día en el grafico
-    ax.plot(data['Close'], label='Precio', alpha=0.5)
-    ax.plot(data['MA20'], label='MA20')
-    ax.plot(data['MA50'], label='MA50')
-
-    ax.plot(
-        data[data['Position'] == 1].index,
-        data['MA20'][data['Position'] == 1],
-        '^', markersize=8, label='Compra'
+def ejecutar_gestor():
+    print(f"--- Iniciando sesión del Gestor Patrimonial ({datetime.now().strftime('%Y-%m-%d')}) ---")
+    # 1. Inicializar API y Cargar Memoria
+    api = tradeapi.REST(
+        os.getenv("ALPACA_API_KEY"), 
+        os.getenv("ALPACA_SECRET_KEY"), 
+        API_CONFIG["BASE_URL"]
     )
-
-    ax.plot(
-        data[data['Position'] == -1].index,
-        data['MA20'][data['Position'] == -1],
-        'v', markersize=8, label='Venta'
-    )
-
-    ax.set_title(simbolo)
-    ax.legend()
-    ax.grid()
-
-def ejecutar_trade(simbolo, senal, cantidad):
-    """Ejecuta una orden de compra o venta en Alpaca según la señal recibida."""
+    portafolio = cargar_portafolio()
     
-    posiciones = api.list_positions()
-    tengo_posicion = any(p.symbol == simbolo for p in posiciones)
-
-    if senal == 1 and not tengo_posicion:
-        print(f"Ejecutando COMPRA de {cantidad} acciones de {simbolo}...")
-        api.submit_order(
-            symbol=simbolo,
-            qty=cantidad,
-            side="buy",
-            type="market",
-            time_in_force="gtc"
-        )
-
-    elif senal == -1 and tengo_posicion:
-        print(f"Ejecutando VENTA de {cantidad} acciones de {simbolo}...")
-        api.submit_order(
-            symbol=simbolo,
-            qty=cantidad,
-            side="sell",
-            type="market",
-            time_in_force="gtc"
-        )
-
-    elif senal == 1 and tengo_posicion:
-        print(f"{simbolo}: ya tienes posición abierta.")
-
-    elif senal == -1 and not tengo_posicion:
-        print(f"{simbolo}: no tienes posición para vender.")
-
-    else:
-        print(f"{simbolo}: sin señal de trading.")
-
-# --- MAIN ---
-#Hay que recordar siempre mantener el orden al ejecutar las funciones, ya me dieron varios errores por eso...
-def ejecutar_bot_completo():
-    """Función que encapsula la lógica de análisis y trading."""
-    simbolos = ["INTC","WBA", "MSFT"]
-    fig, axes = plt.subplots(1, len(simbolos), figsize=(15, 5))
-
-    for i, simbolo in enumerate(simbolos):
-        print(f"\n--- {simbolo} ---")
-        data = obtener_datos(simbolo)
-        if data is None or data.empty:
-            continue
-
-        data = calcular_indicadores(data)
-        data = calcular_senales(data)
-        historial_cruces(data)
-        graficar(data, simbolo, axes[i])
+    # 2. REVISIÓN DE CARTERA (Protección del Capital - Stop Loss)
+    print("\n[1] Revisando Stop Loss para posiciones actuales...")
+    # Creamos una lista de llaves para evitar errores al modificar el dict durante el loop
+    simbolos_en_cartera = list(portafolio["positions"].keys())
+    
+    for simbolo in simbolos_en_cartera:
+        info = portafolio["positions"][simbolo]
+        precio_actual = obtener_precio_actual(simbolo)
         
-        senal = calcular_senal(data)
-        precio_actual = float(data['Close'].iloc[-1])
+        if precio_actual:
+            debe_vender, variacion = calcular_salida(precio_actual, info["buy_price"])
+            
+            if debe_vender:
+                print(f"ALERTA STOP LOSS: {simbolo} ha caído {variacion:.2%}. Ejecutando venta.")
+                if not MODO_SIMULACION:
+                    api.submit_order(symbol=simbolo, qty=info["shares"], side="sell", type="market")
+                    actualizar_posicion(simbolo, 0, 0, añadir=False)
+            else:
+                print(f"{simbolo}: Rendimiento actual {variacion:+.2%}. Manteniendo.")
+        else:
+            print(f"No se pudo obtener el precio para {simbolo}. Saltando...")
 
-        cuenta = api.get_account()
-        saldo = float(cuenta.cash)
+# 3. BÚSQUEDA DE OPORTUNIDADES (Stock Screening & Diversificación)
+    print("\n[2] Escaneando Watchlist para nuevas oportunidades...")
+    cuenta = api.get_account()
+    hay_efectivo, saldo_total = procesar_dividendos_y_efectivo(cuenta)
+    
+    if hay_efectivo:
+        # PASO A: Filtrar quiénes son aptos
+        candidatos_aptos = []
+        for simbolo in WATCHLIST:
+            if simbolo not in portafolio["positions"]:
+                if cumple_filtros_calidad(simbolo):
+                    candidatos_aptos.append(simbolo)
+                else:
+                    print(f"{simbolo} no cumple los filtros de calidad/momentum hoy.")
 
-        cantidad, stop_loss = validar_orden(precio_actual, saldo)
+        # PASO B: Si hay candidatos, repartir el saldo y comprar
+        if candidatos_aptos:
+            num_candidatos = len(candidatos_aptos)
+            capital_por_accion = saldo_total / num_candidatos
+            
+            print(f"\n Saldo total: ${saldo_total:.2f} | Distribución: ${capital_por_accion:.2f} por acción.")
 
-        print(f"Señal: {senal} | Precio: {precio_actual:.2f} | Cantidad: {cantidad} | Stop Loss: {stop_loss:.2f}")
-        ejecutar_trade(simbolo, senal, cantidad)
+            for simbolo in candidatos_aptos:
+                precio_compra = obtener_precio_actual(simbolo)
+                if precio_compra:
+                    cantidad = calcular_cantidad_compra(capital_por_accion, precio_compra)
+                    
+                    if cantidad > 0:
+                        print(f" COMPRA PROGRAMADA: {simbolo} | Cantidad: {cantidad} | Total: ${cantidad * precio_compra:.2f}")
+                        if not MODO_SIMULACION:
+                            api.submit_order(symbol=simbolo, qty=cantidad, side="buy", type="market")
+                            actualizar_posicion(simbolo, precio_compra, cantidad)
+                    else:
+                        print(f"{simbolo}: Capital insuficiente para comprar al menos 1 acción.")
+        else:
+            print("🔍 No se encontraron nuevas oportunidades que cumplan los filtros.")
+    else:
+        print(f"Saldo insuficiente (${saldo_total:.2f}). Esperando dividendos o depósitos.")
 
-    plt.tight_layout()
-    plt.show(block=False) # block=False permite que el script siga
-    plt.pause(5)          # Muestra el gráfico 5 segundos
-    plt.close(fig)        # Cierra la ventana para la siguiente vuelta
+    print("\n--- Ejecución finalizada con éxito ---")
 
-# Esto permite que sigas probando el archivo solo, si quieres
 if __name__ == "__main__":
-    ejecutar_bot_completo()
+    ejecutar_gestor()
