@@ -1,4 +1,30 @@
 {
     "cash_available": 0.0,
-    "positions": {}
+    "positions": {
+        "AAPL": {
+            "buy_price": 273.04998779296875,
+            "shares": 73,
+            "last_tick": 273.04998779296875
+        },
+        "GOOGL": {
+            "buy_price": 337.4200134277344,
+            "shares": 59,
+            "last_tick": 337.4200134277344
+        },
+        "NVDA": {
+            "buy_price": 202.05999755859375,
+            "shares": 98,
+            "last_tick": 202.05999755859375
+        },
+        "AMZN": {
+            "buy_price": 248.27999877929688,
+            "shares": 80,
+            "last_tick": 248.27999877929688
+        },
+        "JNJ": {
+            "buy_price": 230.69000244140625,
+            "shares": 86,
+            "last_tick": 230.69000244140625
+        }
+    }
 }

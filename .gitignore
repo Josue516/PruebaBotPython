@@ -2,3 +2,6 @@
 
 #Carpetas de python
 __pycache__/
+
+#Archivos delicados
+data/portfolio.json
